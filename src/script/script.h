@@ -277,7 +277,7 @@ public:
 
     inline CScriptNum operator-()                         const
     {
-        assert(m_value != std::numeric_limits<int64_t>::min());
+        assert(m_value != (std::numeric_limits<int64_t>::min)());
         return CScriptNum(-m_value);
     }
 
@@ -289,16 +289,16 @@ public:
 
     inline CScriptNum& operator+=( const int64_t& rhs)
     {
-        assert(rhs == 0 || (rhs > 0 && m_value <= std::numeric_limits<int64_t>::max() - rhs) ||
-                           (rhs < 0 && m_value >= std::numeric_limits<int64_t>::min() - rhs));
+        assert(rhs == 0 || (rhs > 0 && m_value <= (std::numeric_limits<int64_t>::max)() - rhs) ||
+                           (rhs < 0 && m_value >= (std::numeric_limits<int64_t>::min)() - rhs));
         m_value += rhs;
         return *this;
     }
 
     inline CScriptNum& operator-=( const int64_t& rhs)
     {
-        assert(rhs == 0 || (rhs > 0 && m_value >= std::numeric_limits<int64_t>::min() + rhs) ||
-                           (rhs < 0 && m_value <= std::numeric_limits<int64_t>::max() + rhs));
+        assert(rhs == 0 || (rhs > 0 && m_value >= (std::numeric_limits<int64_t>::min)() + rhs) ||
+                           (rhs < 0 && m_value <= (std::numeric_limits<int64_t>::max)() + rhs));
         m_value -= rhs;
         return *this;
     }
@@ -311,10 +311,10 @@ public:
 
     int getint() const
     {
-        if (m_value > std::numeric_limits<int>::max())
-            return std::numeric_limits<int>::max();
-        else if (m_value < std::numeric_limits<int>::min())
-            return std::numeric_limits<int>::min();
+        if (m_value > (std::numeric_limits<int>::max)())
+            return (std::numeric_limits<int>::max)();
+        else if (m_value < (std::numeric_limits<int>::min)())
+            return (std::numeric_limits<int>::min)();
         return m_value;
     }
 

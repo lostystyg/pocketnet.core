@@ -27,6 +27,7 @@ project (
         Pocketnet-Core 
         VERSION ${_CLIENT_VERSION_MAJOR}.${_CLIENT_VERSION_MINOR}.${_CLIENT_VERSION_REVISION}
         HOMEPAGE_URL ${_HOMEPAGE}
+        LANGUAGES CXX
         )
 
 add_subdirectory(src/)

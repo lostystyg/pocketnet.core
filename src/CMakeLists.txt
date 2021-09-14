@@ -94,7 +94,8 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 # Check endian headers
 include(CmakeCheckEndian.cmake)
-
+set(EVENT_INCLUDES C:\\1Home\\Devs\\vcpkg\\packages\\libevent_x86-windows\\include)
+set(SQLITE_INCLUDES C:\\1Home\\Devs\\vcpkg\\packages\\sqlite3_x86-windows\\include)
 # LevelDB
 # TODO only if EMBEDDED_LVLDB defined
 add_subdirectory(leveldb/)
@@ -114,6 +115,8 @@ set(WITH_PIC ${WITH_PIC_BACKUP} CACHE BOOL "Enable fPIC" FORCE)
 # Finding boost
 # TODO minimal boost version is increased to 1.66 because websockets (websocket/ws.h) are using lambdas as WriteHandler. This functional was implemented in 1.66.
 find_package(Boost 1.66 REQUIRED COMPONENTS System Thread Chrono filesystem)
+#message(STATUS ${Boost_INCLUDE_DIR})
+#include_directories(${Boost_INCLUDE_DIR})
 ######## Boost sleep functions validation
 set(CHECK_BOOST_SLEEP "#include <boost/thread/thread.hpp>
                         #include <boost/version.hpp>
@@ -283,9 +286,9 @@ set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES_BACKUP})
 set(CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS_BACKUP})
 
 # Looking for required system libraries
-find_library(REQUIRED event)
-find_library(REQUIRED event_pthreads)
-find_library(REQUIRED sqlite3)
+find_library(EVENT event REQUIRED PATHS "C:\\1Home\\Devs\\vcpkg\\packages\\libevent_x86-windows\\lib")
+#find_library(EVENT_PTHREADS event_pthreads REQUIRED)
+find_library(SQLITE3 sqlite3 REQUIRED PATHS "C:\\1Home\\Devs\\vcpkg\\packages\\sqlite3_x86-windows\\lib")
 find_package(OpenSSL REQUIRED)
 
 list(APPEND CMAKE_REQUIRED_FLAGS ${COMPAT_LDFLAGS})
@@ -447,6 +450,8 @@ target_link_libraries(${POCKETCOIN_UTIL} PRIVATE ${POCKETCOIN_SUPPORT} ${POCKETC
 if(ENABLE_GLIBC_BACK_COMPAT)
     target_sources(${POCKETCOIN_UTIL} PRIVATE compat/glibc_compat.cpp)
 endif()
+message(${Boost_INCLUDE_DIRS})
+target_include_directories(${POCKETCOIN_UTIL} PUBLIC ${Boost_INCLUDE_DIRS})
 
 ######## Crypto
 set(POCKETCOIN_CRYPTO pocketcoin_crypto)
@@ -486,18 +491,34 @@ add_library(${POCKETCOIN_CRYPTO}
 target_link_libraries(${POCKETCOIN_CRYPTO} PRIVATE ${POCKETCOIN_COMMON} ${POCKETCOIN_SUPPORT} secp256k1)
 if(ENABLE_SSE41)
     target_sources(${POCKETCOIN_CRYPTO} PRIVATE crypto/sha256_sse41.cpp)
-    target_compile_definitions(${POCKETCOIN_CRYPTO} PRIVATE ENABLE_SSE41)
-    target_compile_options(${POCKETCOIN_CRYPTO} PRIVATE -msse4.1)
+    if(MSVC)
+#        TODO it seems like windows fails with everything exept sse2 that is enabled by default
+#        Futhermore there are cmake scripts to find sse4.1 or avx support where they are always hardcoded as false for Windows
+#        https://github.com/magic-sph/magic/blob/master/cmake/FindSSE.cmake
+#        target_compile_options(${POCKETCOIN_CRYPTO} PRIVATE /arch:SSE4.1)
+    else()
+        target_compile_definitions(${POCKETCOIN_CRYPTO} PRIVATE ENABLE_SSE41)
+        target_compile_options(${POCKETCOIN_CRYPTO} PRIVATE -msse4.1)
+    endif()
 endif()
 if(ENABLE_AVX2)
     target_sources(${POCKETCOIN_CRYPTO} PRIVATE crypto/sha256_avx2.cpp)
-    target_compile_definitions(${POCKETCOIN_CRYPTO} PRIVATE ENABLE_AVX2)
-    target_compile_options(${POCKETCOIN_CRYPTO} PRIVATE -mavx -mavx2)
+    if(MSVC)
+#        target_compile_options(${POCKETCOIN_CRYPTO} PRIVATE /arch:AVX /arch:AVX2)
+    else()
+        target_compile_definitions(${POCKETCOIN_CRYPTO} PRIVATE ENABLE_AVX2)
+        target_compile_options(${POCKETCOIN_CRYPTO} PRIVATE -mavx -mavx2)
+    endif()
 endif()
 if(ENABLE_SHANI)
     target_sources(${POCKETCOIN_CRYPTO} PRIVATE crypto/sha256_shani.cpp)
-    target_compile_definitions(${POCKETCOIN_CRYPTO} PRIVATE ENABLE_SHANI)
-    target_compile_options(${POCKETCOIN_CRYPTO} PRIVATE -msse4 -msha)
+    if(MSVC)
+#        target_compile_options(${POCKETCOIN_CRYPTO} PRIVATE /arch:SSE4 /arch:SHA)
+    else()
+        target_compile_definitions(${POCKETCOIN_CRYPTO} PRIVATE ENABLE_SHANI)
+        target_compile_options(${POCKETCOIN_CRYPTO} PRIVATE -msse4 -msha)
+    endif()
+
 endif()
 
 
@@ -530,7 +551,7 @@ set(POCKETCOIN_COMMON_RPC pocketcoin_common_rpc)
 add_library(${POCKETCOIN_COMMON_RPC} 
                 rpc/protocol.h
                 rpc/protocol.cpp)  
-target_link_libraries(${POCKETCOIN_COMMON_RPC} PRIVATE ${POCKETCOIN_CRYPTO})
+target_link_libraries(${POCKETCOIN_COMMON_RPC} PRIVATE ${POCKETCOIN_CRYPTO} ${POCKETCOIN_UTIL})
 
 
 ########### Server
@@ -741,7 +762,9 @@ add_library(${POCKETCOIN_SERVER}
                 pocketdb/consensus/Lottery.cpp
                 pocketdb/consensus/Reputation.cpp
             )
-target_link_libraries(${POCKETCOIN_SERVER} PRIVATE ${POCKETCOIN_COMMON_RPC} ${POCKETCOIN_UTIL} ${POCKETCOIN_COMMON} ${POCKETCOIN_SYSTEM} ${POCKETCOIN_CONSENSUS} ${POCKETCOIN_CRYPTO} leveldb univalue sqlite3)
+target_link_libraries(${POCKETCOIN_SERVER} PRIVATE ${POCKETCOIN_COMMON_RPC} ${POCKETCOIN_UTIL} ${POCKETCOIN_COMMON} ${POCKETCOIN_SYSTEM} ${POCKETCOIN_CONSENSUS} ${POCKETCOIN_CRYPTO} leveldb univalue ${SQLITE3} OpenSSL::Crypto Boost::boost)
+target_include_directories(${POCKETCOIN_SERVER} PRIVATE ${SQLITE_INCLUDES} ${EVENT_INCLUDES})
+
 if(NOT DISABLE_WALLET)
     target_sources(pocketcoin_server PRIVATE
                         wallet/coincontrol.h
@@ -800,11 +823,14 @@ endif()
 
 set(POCKETCOIND pocketcoind)
 add_executable(${POCKETCOIND} pocketcoind.cpp)
-target_link_libraries(${POCKETCOIND} PRIVATE ${POCKETCOIN_SERVER} ${POCKETCOIN_COMMON_RPC} ${POCKETDB} ${POCKETCOIN_UTIL} ${POCKETCOIN_CONSENSUS} ${POCKETCOIN_SYSTEM} event event_pthreads memenv)
+target_link_libraries(${POCKETCOIND} PRIVATE ${POCKETCOIN_SERVER} ${POCKETCOIN_COMMON_RPC} ${POCKETDB} ${POCKETCOIN_UTIL} ${POCKETCOIN_CONSENSUS} ${POCKETCOIN_SYSTEM} ${EVENT} memenv)
+target_include_directories(${POCKETCOIND} PRIVATE ${EVENT_INCLUDES})
+
 
 set(POCKETCOIN_CLI pocketcoin_cli)
 add_executable(${POCKETCOIN_CLI} pocketcoin-cli.cpp rpc/client.cpp)
-target_link_libraries(${POCKETCOIN_CLI} PRIVATE ${POCKETCOIN_UTIL} ${POCKETCOIN_COMMON_RPC} univalue event)
+target_link_libraries(${POCKETCOIN_CLI} PRIVATE ${POCKETCOIN_UTIL} ${POCKETCOIN_COMMON_RPC} univalue ${EVENT})
+target_include_directories(${POCKETCOIN_CLI} PRIVATE ${EVENT_INCLUDES})
 
 set(POCKETCOIN_TX pocketcoin_tx)
 add_executable(${POCKETCOIN_TX} pocketcoin-tx.cpp)

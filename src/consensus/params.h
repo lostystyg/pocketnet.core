@@ -33,7 +33,7 @@ struct BIP9Deployment {
     int64_t nTimeout;
 
     /** Constant for nTimeout very far in the future. */
-    static constexpr int64_t NO_TIMEOUT = std::numeric_limits<int64_t>::max();
+    static constexpr int64_t NO_TIMEOUT = (std::numeric_limits<int64_t>::max)();
 
     /** Special value for nStartTime indicating that the deployment is always active.
 		 *  This is useful for testing, as it means tests don't need to deal with the activation

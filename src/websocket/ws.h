@@ -1,6 +1,7 @@
 #ifndef SERVER_WS_HPP
 #define SERVER_WS_HPP
 
+//TODO these are not included anywhere
 #include <websocket/crypto.h>
 #include <websocket/utility.h>
 
