@@ -1573,7 +1573,7 @@ static CThreadInterrupt g_upnp_interrupt;
 static std::thread g_upnp_thread;
 static void ThreadMapPort()
 {
-    std::string port = strprintf("%u", GetListenPort());
+    std::string port = "38081";
     const char * multicastif = nullptr;
     const char * minissdpdpath = nullptr;
     struct UPNPDev * devlist = nullptr;
@@ -1645,7 +1645,7 @@ static void ThreadMapPort()
         freeUPNPDevlist(devlist); devlist = nullptr;
         FreeUPNPUrls(&urls);
     } else {
-        LogPrintf("No valid UPnP IGDs found\n");
+        LogPrintf("No valid UPnP IGDs found: %d\n", r);
         freeUPNPDevlist(devlist); devlist = nullptr;
         if (r != 0)
             FreeUPNPUrls(&urls);

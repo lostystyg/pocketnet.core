@@ -812,6 +812,11 @@ target_link_libraries(${POCKETCOIN_SERVER} PRIVATE ${POCKETCOIN_COMMON_RPC} ${PO
 target_include_directories(${POCKETCOIN_SERVER} PRIVATE ${OPENSSL_INCLUDE_DIR} ${Event_INCLUDE_DIRS})
 target_link_libraries(${POCKETCOIN_SERVER} PUBLIC sqlite3 univalue)
 
+find_package(Miniupnpc REQUIRED)
+if (Miniupnpc_FOUND)
+    target_compile_definitions(${POCKETCOIN_SERVER} PRIVATE USE_UPNP)
+    target_link_libraries(${POCKETCOIN_SERVER} PRIVATE Miniupnpc::miniupnpc)
+endif()
 if (NOT DISABLE_WALLET)
     target_sources(${POCKETCOIN_SERVER} PRIVATE
             wallet/coincontrol.h

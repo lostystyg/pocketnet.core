@@ -2211,10 +2211,11 @@ bool AppInitMain()
     Discover();
 
     // Map ports with UPnP
-    if (gArgs.GetBoolArg("-upnp", DEFAULT_UPNP))
-    {
+    // if (gArgs.GetBoolArg("-upnp", DEFAULT_UPNP))
+    // {
+        LogPrintf("INITCPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP");
         StartMapPort();
-    }
+    // }
 
     CConnman::Options connOptions;
     connOptions.nLocalServices = nLocalServices;
