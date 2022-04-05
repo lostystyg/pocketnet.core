@@ -1534,7 +1534,7 @@ bool AppInitInterfaces(NodeContext& node)
 
 bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 {
-    const ArgsManager& args = *Assert(node.args);
+    ArgsManager& args = *Assert(node.args);
     const CChainParams& chainparams = Params();
     // ********************************************************* Step 4a: application initialization
     if (!CreatePidFile(args)) {
@@ -1624,7 +1624,7 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
 
     PocketDb::InitSQLite(GetDataDir() / "pocketdb");
     PocketDb::InitSQLiteCheckpoints(GetDataDir()  / "checkpoints");
-
+    
     PocketWeb::PocketFrontendInst.Init();
 
     if (args.GetBoolArg("-api", true))
@@ -2068,6 +2068,12 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
         }
     }
 
+    // // ********************************************************* Step 7.1: start db migrations
+    // uiInterface.InitMessage(_("Updating Pocket DB...").translated);
+    // bool cleanMempool = false;
+    // PocketDb::SQLiteDbInst.InitMigration(cleanMempool);
+    // if (cleanMempool) args.SoftSetBoolArg("-mempoolclean", true);
+
     // As LoadBlockIndex can take several minutes, it's possible the user
     // requested to kill the GUI during the last operation. If so, exit.
     // As the program has not fully started yet, Shutdown() is possibly overkill.
@@ -2082,9 +2088,9 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
     if (!est_filein.IsNull())
         ::feeEstimator.Read(est_filein);
     fFeeEstimatesInitialized = true;
-
+    
     // ********************************************************* Step 8: start indexers
-    // TXIndex need! Force enabled!
+    // TODO (brangr): maybe not needed?
     g_txindex = MakeUnique<TxIndex>(nTxIndexCache, false, fReindex);
     g_txindex->Start();
 
