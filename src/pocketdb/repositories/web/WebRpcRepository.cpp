@@ -25,10 +25,12 @@ namespace PocketDb
             m_data.emplace_back(shortForm.Serialize(false));
         }
 
-        void InsertNotifiers(const int64_t& blocknum, ShortTxType contextType, std::set<std::string> addresses)
+        void InsertNotifiers(const int64_t& blocknum, ShortTxType contextType, std::map<std::string, std::optional<ShortAccount>> addresses)
         {
             for (const auto& address: addresses) {
-                m_notifiers[address][contextType].emplace_back(m_txArrIndicies.at(blocknum));
+                auto& notifierEntry = m_notifiers[address.first];
+                notifierEntry.second[contextType].emplace_back(m_txArrIndicies.at(blocknum));
+                notifierEntry.first = address.second;
             }
         }
 
@@ -42,35 +44,36 @@ namespace PocketDb
             return res;
         }
 
-        UniValue Serialize(const std::map<std::string, ShortAccount> accsData) const
+        UniValue Serialize() const
         {
             UniValue notifiersUni (UniValue::VOBJ);
+            notifiersUni.reserveKVSize(m_notifiers.size());
             for (const auto& notifier: m_notifiers) {
                 UniValue notifierData (UniValue::VOBJ);
-                for (const auto& contextTypeIndicies: notifier.second) {
+                notifierData.reserveKVSize(notifier.second.second.size());
+                for (const auto& contextTypeIndicies: notifier.second.second) {
                     UniValue indicies (UniValue::VARR);
                     indicies.push_backV(contextTypeIndicies.second);
                     notifierData.pushKV(PocketHelpers::ShortTxTypeConvertor::toString(contextTypeIndicies.first), indicies, false);
                 }
-                // TODO (losty): e and i!!!
                 UniValue notifierUni (UniValue::VOBJ);
-                notifierUni.pushKV("e", notifierData);
-                if (auto accData = accsData.find(notifier.first); accData != accsData.end()) {
-                    notifierUni.pushKV("i", accData->second.Serialize());
+                if (const auto& accData = notifier.second.first; accData.has_value()) {
+                    notifierUni.pushKV("i", accData->Serialize(), false);
                 }
+                notifierUni.pushKV("e", std::move(notifierData), false);
                 notifiersUni.pushKV(notifier.first, notifierUni, false);
             }
             UniValue data (UniValue::VARR);
             data.push_backV(m_data);
 
             UniValue res (UniValue::VOBJ);
-            res.pushKV("data", data);
-            res.pushKV("notifiers", notifiersUni);
+            res.pushKV("data", data, false);
+            res.pushKV("notifiers", notifiersUni,false);
             return res;
         }
 
     private:
-        std::map<std::string, std::map<ShortTxType, std::vector<UniValue>>> m_notifiers;
+        std::map<std::string, std::pair<std::optional<ShortAccount>, std::map<ShortTxType, std::vector<UniValue>>>> m_notifiers;
         std::map<int64_t, int64_t> m_txArrIndicies;
         std::vector<UniValue> m_data;
     };
@@ -145,6 +148,20 @@ namespace PocketDb
             return std::nullopt;
         }
 
+        std::optional<ShortAccount> ParseAccount(sqlite3_stmt* stmt, const int& index)
+        {
+            auto [ok1, lang] = TryGetColumnString(stmt, index);
+            auto [ok2, name] = TryGetColumnString(stmt, index+1);
+            auto [ok3, avatar] = TryGetColumnString(stmt, index+2);
+            auto [ok4, reputation] = TryGetColumnInt64(stmt, index+3);
+            if (ok2 && ok4) { // TODO (losty): can there be no avatar?
+                auto acc = ShortAccount(name, avatar, reputation);
+                if (ok1) acc.SetLang(lang);
+                return acc;
+            }
+            return std::nullopt;
+        }
+
     protected:
         std::optional<ShortTxData> ProcessTxData(sqlite3_stmt* stmt, int& index)
         {
@@ -168,23 +185,11 @@ namespace PocketDb
                 if (auto [ok, val] = TryGetColumnString(stmt, i+9); ok) txData.SetDescription(val);
                 if (auto [ok, val] = TryGetColumnString(stmt, i+10); ok) txData.SetCommentParentId(val);
                 if (auto [ok, val] = TryGetColumnString(stmt, i+11); ok) txData.SetCommentAnswerId(val);
-                txData.SetAccount(_processAccount(stmt, i+12));
+                txData.SetAccount(ParseAccount(stmt, i+12));
                 if (auto [ok, val] = TryGetColumnString(stmt, i+16); ok) txData.SetMultipleAddresses(_processMultipleAddresses(val));
                 return txData;
             }
 
-            return std::nullopt;
-        }
-
-        std::optional<ShortAccount> _processAccount(sqlite3_stmt* stmt, const int& index)
-        {
-            auto [ok1, name] = TryGetColumnString(stmt, index);
-            auto [ok2, avatar] = TryGetColumnString(stmt, index+1);
-            auto [ok3, badge] = TryGetColumnString(stmt, index+2);
-            auto [ok4, reputation] = TryGetColumnInt64(stmt, index+3);
-            if (ok1 && ok4) { // TODO (losty): can there be no avatar?
-                return ShortAccount(name, avatar, badge, reputation);
-            }
             return std::nullopt;
         }
 
@@ -204,6 +209,15 @@ namespace PocketDb
                 if (elem.exists("AddressHash") && elem["AddressHash"].isStr()) output.SetAddressHash(elem["AddressHash"].get_str());
                 if (elem.exists("Number") && elem["Number"].isNum()) output.SetNumber(elem["Number"].get_int());
                 if (elem.exists("ScriptPubKey") && elem["ScriptPubKey"].isStr()) output.SetScriptPubKey(elem["ScriptPubKey"].get_str());
+                if (elem.exists("Account") && elem["Account"].isStr()) {
+                    const auto& accJson = elem["Account"];
+                    ShortAccount accData;
+                    if (accJson.exists("Lang") && accJson["Lang"].isStr()) accData.SetLang(accJson["Lang"].get_str());
+                    if (accJson.exists("Name") && accJson["Name"].isStr()) accData.SetName(accJson["Name"].get_str());
+                    if (accJson.exists("Avatar") && accJson["Avatar"].isStr()) accData.SetAvatar(accJson["Avatar"].get_str());
+                    if (accJson.exists("Rep") && accJson["Rep"].isNum()) accData.SetReputation(accJson["Rep"].get_int64());
+                    output.SetAccount(accData);
+                }
 
                 res.emplace_back(std::move(output));
             }
@@ -272,20 +286,21 @@ namespace PocketDb
     {
     public:
         NotificationsReconstructor() {
-            m_parser.Reset(1);
+            m_parser.Reset(5);
         }
 
         void FeedRow(sqlite3_stmt* stmt)
         {
-            std::set<std::string> notifiers;
+            std::map<std::string, std::optional<ShortAccount>> notifiers;
             auto [ok, addressOne] = TryGetColumnString(stmt, 0);
             if (ok) {
-                notifiers.insert(addressOne);
+                auto pulp = m_parser.ParseAccount(stmt, 1);
+                notifiers.insert(std::move(std::make_pair(std::move(addressOne), std::move(pulp))));
             } else {
                 if (auto outputs = m_parser.ParseOutputs(stmt); outputs) {
                     for (const auto& output: *outputs) {
                         if (output.GetAddressHash() && !output.GetAddressHash()->empty()) {
-                            notifiers.insert(*output.GetAddressHash());
+                            notifiers.insert({*output.GetAddressHash(), output.GetAccount()});
                         }
                     }
                 }
@@ -296,7 +311,7 @@ namespace PocketDb
             if (!m_notifications.HasData(blockNum)) {
                 m_notifications.InsertData(m_parser.ParseFull(stmt));
             }
-            m_notifications.InsertNotifiers(blockNum, m_parser.ParseType(stmt), notifiers);
+            m_notifications.InsertNotifiers(blockNum, m_parser.ParseType(stmt), std::move(notifiers));
         }
         NotificationsResult GetResult() const
         {
@@ -5754,7 +5769,11 @@ namespace PocketDb
             ShortTxType::Money, { R"sql(
                 -- Incoming money
                 select
-                    null, -- Will be filled 
+                    null, -- Will be filled
+                    null,
+                    null,
+                    null,
+                    null,
                     (')sql" + ShortTxTypeConvertor::toString(ShortTxType::Money) + R"sql(')TP,
                     t.Hash,
                     t.Type,
@@ -5775,11 +5794,27 @@ namespace PocketDb
                     ),
                     (
                         select json_group_array(json_object(
-                                'Value', Value,
-                                'AddressHash', AddressHash,
-                                'ScriptPubKey', ScriptPubKey
-                                ))
+                                'Value', o.Value,
+                                'AddressHash', o.AddressHash,
+                                'ScriptPubKey', o.ScriptPubKey,
+                                'Account', json_object(
+                                    'Lang', pna.String1,
+                                    'Name', pna.String2,
+                                    'Avatar', pna.String3,
+                                    'Rep', ifnull(rna.Value,0)
+                                )
+                            ))
                         from TxOutputs o
+                        left join Transactions na indexed by Transactions_Type_Last_String1_String2_Height
+                            on na.Type = 100
+                            and na.Last = 1
+                            and na.String1 = o.AddressHash
+                        left join Payload pna
+                            on pna.TxHash = na.Hash
+                        left join Ratings rna indexed by Ratings_Type_Id_Last_Height
+                            on rna.Type = 0
+                            and rna.Id = na.Id
+                            and rna.Last = 1
                         where o.TxHash = t.Hash
                             and o.TxHeight = t.Height
                         order by o.Number
@@ -5798,6 +5833,10 @@ namespace PocketDb
                 -- referals
                 select
                     t.String2,
+                    pna.String1,
+                    pna.String2,
+                    pna.String3,
+                    ifnull(rna.Value,0),
                     (')sql" + ShortTxTypeConvertor::toString(ShortTxType::Referal) + R"sql(')TP,
                     t.Hash,
                     t.Type,
@@ -5811,9 +5850,9 @@ namespace PocketDb
                     null,
                     null,
                     null,
+                    p.String1,
                     p.String2,
                     p.String3,
-                    null,
                     ifnull(r.Value,0) -- TODO (losty): do we need rating if referal is always a new user?
 
                 from Transactions t indexed by Transactions_Height_Type
@@ -5825,6 +5864,19 @@ namespace PocketDb
                     on r.Type = 0
                     and r.Id = t.Id
                     and r.Last = 1
+
+                left join Transactions na indexed by Transactions_Type_Last_String1_String2_Height
+                    on na.Type = 100
+                    and na.Last = 1
+                    and na.String1 = t.String2
+
+                left join Payload pna
+                    on pna.TxHash = na.Hash
+
+                left join Ratings rna indexed by Ratings_Type_Id_Last_Height
+                    on rna.Type = 0
+                    and rna.Id = na.Id
+                    and rna.Last = 1
 
                 where t.Type = 100
                     and t.String2 is not null
@@ -5839,6 +5891,10 @@ namespace PocketDb
                 -- Comment answers
                 select
                     c.String1,
+                    pna.String1,
+                    pna.String2,
+                    pna.String3,
+                    ifnull(rna.Value,0),
                     (')sql" + ShortTxTypeConvertor::toString(ShortTxType::Answer) + R"sql(')TP,
                     a.Hash,
                     a.Type,
@@ -5852,9 +5908,9 @@ namespace PocketDb
                     pa.String1,
                     a.String4,
                     a.String5,
+                    paa.String1,
                     paa.String2,
                     paa.String3,
-                    null,
                     ifnull(ra.Value,0),
                     null,
                     post.Hash,
@@ -5869,9 +5925,9 @@ namespace PocketDb
                     null,
                     null,
                     ppost.String2,
+                    papost.String1,
                     papost.String2,
                     papost.String3,
-                    null,
                     ifnull(rapost.Value,0)
 
                 from Transactions a indexed by Transactions_Height_Type -- Other answers
@@ -5921,6 +5977,19 @@ namespace PocketDb
                     and ra.Id = aa.Id
                     and ra.Last = 1
 
+                left join Transactions na indexed by Transactions_Type_Last_String1_String2_Height
+                    on na.Type = 100
+                    and na.Last = 1
+                    and na.String1 = c.String1
+
+                left join Payload pna
+                    on pna.TxHash = na.Hash
+
+                left join Ratings rna indexed by Ratings_Type_Id_Last_Height
+                    on rna.Type = 0
+                    and rna.Id = na.Id
+                    and rna.Last = 1
+
                 where a.Type = 204 -- only orig
                     and a.Height = ?
         )sql",
@@ -5932,6 +6001,10 @@ namespace PocketDb
                 -- Comments for my content
                 select
                     p.String1,
+                    pna.String1,
+                    pna.String2,
+                    pna.String3,
+                    ifnull(rna.Value,0),
                     (')sql" + ShortTxTypeConvertor::toString(ShortTxType::Comment) + R"sql(')TP,
                     c.Hash,
                     c.Type,
@@ -5964,9 +6037,9 @@ namespace PocketDb
                     pc.String1,
                     null,
                     null,
+                    pac.String1,
                     pac.String2,
                     pac.String3,
-                    null,
                     ifnull(rac.Value,0),
                     null,
                     p.Hash,
@@ -6009,6 +6082,19 @@ namespace PocketDb
                 left join Payload pp
                     on pp.TxHash = p.Hash
 
+                left join Transactions na indexed by Transactions_Type_Last_String1_String2_Height
+                    on na.Type = 100
+                    and na.Last = 1
+                    and na.String1 = p.String1
+
+                left join Payload pna
+                    on pna.TxHash = na.Hash
+
+                left join Ratings rna indexed by Ratings_Type_Id_Last_Height
+                    on rna.Type = 0
+                    and rna.Id = na.Id
+                    and rna.Last = 1
+
                 where c.Type = 204 -- only orig
                     and c.Height = ?
         )sql",
@@ -6020,6 +6106,10 @@ namespace PocketDb
                 -- Subscribers
                 select
                     subs.String2,
+                    pna.String1,
+                    pna.String2,
+                    pna.String3,
+                    ifnull(rna.Value,0),
                     (')sql" + ShortTxTypeConvertor::toString(ShortTxType::Subscriber) + R"sql(')TP,
                     subs.Hash,
                     subs.Type,
@@ -6033,9 +6123,9 @@ namespace PocketDb
                     null,
                     null,
                     null,
+                    pu.String1,
                     pu.String2,
                     pu.String3,
-                    null,
                     ifnull(ru.Value,0)
 
                 from Transactions subs indexed by Transactions_Height_Type
@@ -6054,6 +6144,19 @@ namespace PocketDb
                     and ru.Id = u.Id
                     and ru.Last = 1
 
+                left join Transactions na indexed by Transactions_Type_Last_String1_String2_Height
+                    on na.Type = 100
+                    and na.Last = 1
+                    and na.String1 = subs.String2
+
+                left join Payload pna
+                    on pna.TxHash = na.Hash
+
+                left join Ratings rna indexed by Ratings_Type_Id_Last_Height
+                    on rna.Type = 0
+                    and rna.Id = na.Id
+                    and rna.Last = 1
+
                 where subs.Type in (302, 303) -- Ignoring unsubscribers?
                     and subs.Height = ?
         )sql",
@@ -6065,6 +6168,10 @@ namespace PocketDb
                 -- Comment scores
                 select
                     c.String1,
+                    pna.String1,
+                    pna.String2,
+                    pna.String3,
+                    ifnull(rna.Value,0),
                     (')sql" + ShortTxTypeConvertor::toString(ShortTxType::CommentScore) + R"sql(')TP,
                     s.Hash,
                     s.Type,
@@ -6078,9 +6185,9 @@ namespace PocketDb
                     null,
                     null,
                     null,
+                    pacs.String1,
                     pacs.String2,
                     pacs.String3,
-                    null,
                     ifnull(racs.Value,0),
                     null,
                     c.Hash,
@@ -6121,6 +6228,19 @@ namespace PocketDb
                     and racs.Id = acs.Id
                     and racs.Last = 1
 
+                left join Transactions na indexed by Transactions_Type_Last_String1_String2_Height
+                    on na.Type = 100
+                    and na.Last = 1
+                    and na.String1 = c.String1
+
+                left join Payload pna
+                    on pna.TxHash = na.Hash
+
+                left join Ratings rna indexed by Ratings_Type_Id_Last_Height
+                    on rna.Type = 0
+                    and rna.Id = na.Id
+                    and rna.Last = 1
+
                 where s.Type = 301
                     and s.Height = ?
         )sql",
@@ -6132,6 +6252,10 @@ namespace PocketDb
                 -- Content scores
                 select
                     c.String1,
+                    pna.String1,
+                    pna.String2,
+                    pna.String3,
+                    ifnull(rna.Value,0),
                     (')sql" + ShortTxTypeConvertor::toString(ShortTxType::ContentScore) + R"sql(')TP,
                     s.Hash,
                     s.Type,
@@ -6145,9 +6269,9 @@ namespace PocketDb
                     null,
                     null,
                     null,
+                    pacs.String1,
                     pacs.String2,
                     pacs.String3,
-                    null,
                     ifnull(racs.Value,0),
                     null,
                     c.Hash,
@@ -6186,6 +6310,19 @@ namespace PocketDb
                     and racs.Id = acs.Id
                     and racs.Last = 1
 
+                left join Transactions na indexed by Transactions_Type_Last_String1_String2_Height
+                    on na.Type = 100
+                    and na.Last = 1
+                    and na.String1 = c.String1
+
+                left join Payload pna
+                    on pna.TxHash = na.Hash
+
+                left join Ratings rna indexed by Ratings_Type_Id_Last_Height
+                    on rna.Type = 0
+                    and rna.Id = na.Id
+                    and rna.Last = 1
+
                 where s.Type = 300
                     and s.Height = ?
         )sql",
@@ -6197,6 +6334,10 @@ namespace PocketDb
                 -- Content from private subscribers
                 select
                     subs.String1,
+                    pna.String1,
+                    pna.String2,
+                    pna.String3,
+                    ifnull(rna.Value,0),
                     (')sql" + ShortTxTypeConvertor::toString(ShortTxType::PrivateContent) + R"sql(')TP,
                     c.Hash,
                     c.Type,
@@ -6210,9 +6351,9 @@ namespace PocketDb
                     p.String2,
                     null,
                     null,
+                    pac.String1,
                     pac.String2,
                     pac.String3,
-                    null,
                     ifnull(rac.Value,0),
                     null,
                     r.Hash,
@@ -6234,7 +6375,7 @@ namespace PocketDb
                     and subs.String2 = c.String1
                     and subs.Height > 0
 
-                left join Transactions r -- related content - possible reposts
+                left join Transactions r indexed by Transactions_Type_Last_String2_Height -- related content - possible reposts
                     on r.String2 = c.String3
                     and r.Type in (200,201,202)
                     and r.Last = 1
@@ -6259,6 +6400,19 @@ namespace PocketDb
                     and rac.Id = ac.Id
                     and rac.Last = 1
 
+                left join Transactions na indexed by Transactions_Type_Last_String1_String2_Height
+                    on na.Type = 100
+                    and na.Last = 1
+                    and na.String1 = subs.String1
+
+                left join Payload pna
+                    on pna.TxHash = na.Hash
+
+                left join Ratings rna indexed by Ratings_Type_Id_Last_Height
+                    on rna.Type = 0
+                    and rna.Id = na.Id
+                    and rna.Last = 1
+
                 where c.Type in (200,201,202)
                     and c.Hash = c.String2 -- only orig
                     and c.Height = ?
@@ -6271,6 +6425,10 @@ namespace PocketDb
                 -- Boosts for my content
                 select
                     tContent.String1,
+                    pna.String1,
+                    pna.String2,
+                    pna.String3,
+                    ifnull(rna.Value,0),
                     (')sql" + ShortTxTypeConvertor::toString(ShortTxType::Boost) + R"sql(')TP,
                     tBoost.Hash,
                     tboost.Type,
@@ -6303,9 +6461,9 @@ namespace PocketDb
                     null,
                     null,
                     null,
+                    pac.String1,
                     pac.String2,
                     pac.String3,
-                    null,
                     ifnull(rac.Value,0),
                     null,
                     tContent.Hash,
@@ -6344,6 +6502,19 @@ namespace PocketDb
                     and rac.Id = ac.Id
                     and rac.Last = 1
 
+                left join Transactions na indexed by Transactions_Type_Last_String1_String2_Height
+                    on na.Type = 100
+                    and na.Last = 1
+                    and na.String1 = tContent.String1
+
+                left join Payload pna
+                    on pna.TxHash = na.Hash
+
+                left join Ratings rna indexed by Ratings_Type_Id_Last_Height
+                    on rna.Type = 0
+                    and rna.Id = na.Id
+                    and rna.Last = 1
+
                 where tBoost.Type in (208)
                     and tBoost.Last in (0,1)
                     and tBoost.Height = ?
@@ -6356,6 +6527,10 @@ namespace PocketDb
                 -- Reposts
                 select
                     p.String1,
+                    pna.String1,
+                    pna.String2,
+                    pna.String3,
+                    ifnull(rna.Value,0),
                     (')sql" + ShortTxTypeConvertor::toString(ShortTxType::Repost) + R"sql(')TP,
                     r.Hash,
                     r.Type,
@@ -6369,9 +6544,9 @@ namespace PocketDb
                     pr.String2,
                     null,
                     null,
+                    par.String1,
                     par.String2,
                     par.String3,
-                    null,
                     ifnull(rar.Value,0),
                     null,
                     p.Hash,
@@ -6413,6 +6588,19 @@ namespace PocketDb
                     and rar.Id = ar.Id
                     and rar.Last = 1
 
+                left join Transactions na indexed by Transactions_Type_Last_String1_String2_Height
+                    on na.Type = 100
+                    and na.Last = 1
+                    and na.String1 = p.String1
+
+                left join Payload pna
+                    on pna.TxHash = na.Hash
+
+                left join Ratings rna indexed by Ratings_Type_Id_Last_Height
+                    on rna.Type = 0
+                    and rna.Id = na.Id
+                    and rna.Last = 1
+
                 where r.Type in (200,201,202)
                     and r.Hash = r.String2 -- Only orig
                     and r.Height = ?
@@ -6443,8 +6631,7 @@ namespace PocketDb
             }
         }
         auto notificationResult = reconstructor.GetResult();
-        auto accsData = GetShortAccountsForAddresses(notificationResult.GetNotifiersAddresses());
-        return notificationResult.Serialize(accsData);
+        return notificationResult.Serialize();
     }
 
     std::vector<ShortForm> WebRpcRepository::GetEventsForAddresses(const std::string& address, int64_t heightMax, int64_t heightMin, int64_t blockNumMax, const std::set<ShortTxType>& filters)
