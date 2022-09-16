@@ -2545,9 +2545,6 @@ bool CWallet::SignTransaction(CMutableTransaction& tx) const
 			return false;
 		}
 		const CWalletTx& wtx = mi->second;
-		// TODO (losty-fur): seems good
-        // Хороший вопрос, нужно тестировать
-                LogPrintf("CWallet::SignTransaction: DEBUG: creating coin!");
 		coins[input.prevout] = Coin(wtx.tx->vout[input.prevout.n], wtx.m_confirm.block_height, wtx.IsCoinBase(), wtx.IsCoinStake(), PocketHelpers::TransactionHelper::IsPocketTransaction(wtx.tx));
 	}
 	std::map<int, std::string> input_errors;
@@ -4679,7 +4676,7 @@ void CWallet::AvailableCoinsForStaking(std::vector<COutput>& vCoins, unsigned in
 	vCoins.clear();
 
 	{
-        LOCK(cs_wallet);
+		LOCK(cs_wallet);
 		for (std::map<uint256, CWalletTx>::const_iterator it = mapWallet.begin(); it != mapWallet.end(); ++it) {
 			const CWalletTx* pcoin = &(*it).second;
 			const uint256& wtxid = it->first;
@@ -4813,7 +4810,7 @@ bool CWallet::CreateCoinStake(const FillableSigningProvider& keystore, unsigned 
 
 	int64_t nValueIn = 0;
 
-	if (nBalance < Params().GetConsensus().nStakeMinimumThreshold) {
+	if (nBalance < Params().GetConsensus().nStakeCombineThreshold) {
 		return false;
 	}
 
@@ -4920,10 +4917,15 @@ bool CWallet::CreateCoinStake(const FillableSigningProvider& keystore, unsigned 
 				break;
 			}
 
-            // Do not add additional significant input
-            if (pcoin.first->tx->vout[pcoin.second].nValue >= Params().GetConsensus().nStakeCombineThreshold && nCredit >= Params().GetConsensus().nStakeMinimumThreshold) {
-                continue;
-            }
+			// Credit more than nStakeCombineThreshold is not necessary!
+			if (nCredit >= Params().GetConsensus().nStakeCombineThreshold) {
+				break;
+			}
+
+            // // // Do not add additional significant input
+            // if (pcoin.first->tx->vout[pcoin.second].nValue <= Params().GetConsensus().nStakeMinimumThreshold) {
+            //     continue;
+            // }
 
 			// Do not add input that is still too young
 			if (nTimeWeight < Params().GetConsensus().nStakeMinAge) {
@@ -4936,7 +4938,7 @@ bool CWallet::CreateCoinStake(const FillableSigningProvider& keystore, unsigned 
 		}
 	}
 
-	if (nCredit < Params().GetConsensus().nStakeMinimumThreshold) {
+	if (nCredit < Params().GetConsensus().nStakeCombineThreshold) {
 		LogPrintf("CreateCoinStake : Credit does not meet minimum threshold=%d\n", nCredit);
 		return false;
 	}
@@ -5048,14 +5050,11 @@ tuple<uint64_t, uint64_t> CWallet::GetStakeWeight() const
 {
 	// Choose coins to use
 	int64_t nBalance = GetBalance().m_mine_trusted;
-	LogPrintf("GetStakeWeight: DEBUG: using mine_trusted coins: %d", nBalance);
-
 	if (nBalance <= 0) {
 		return {0, 0};
 	}
 
 	std::set<std::pair<const CWalletTx*, unsigned int> > vwtxPrev;
-
 	std::set<std::pair<const CWalletTx*, unsigned int> > setCoins;
 	int64_t nValueIn = 0;
 

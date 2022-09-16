@@ -2366,7 +2366,7 @@ bool CChainState::ConnectBlock(const CBlock& block, const PocketBlockRef& pocket
             {
                 nStakeReward = tx.GetValueOut() - view.GetValueIn(tx);
 
-                if (view.GetValueIn(tx) < Params().GetConsensus().nStakeMinimumThreshold)
+                if (view.GetValueIn(tx) < Params().GetConsensus().nStakeCombineThreshold)
                 {
                     error("ConnectBlock(): Stake input is below threshold");
                     return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-blk-stake-inputs");
@@ -5819,10 +5819,10 @@ bool LoadMempool(CTxMemPool& pool)
             pool.PrioritiseTransaction(i.first, i.second);
         }
 
-        LOCK(pool.cs);
         pool.CleanSQLite(expiredHashes, MemPoolRemovalReason::EXPIRY);
 
         // TODO: remove this try except in v0.22
+        LOCK(pool.cs);
         std::set<uint256> unbroadcast_txids;
         try {
           file >> unbroadcast_txids;
