@@ -356,7 +356,7 @@ namespace PocketDb
         string sql = R"sql(
             SELECT String1, Id
             FROM Transactions
-            WHERE Type in (100, 101, 102)
+            WHERE Type in (100)
               and Height is not null
               and Last = 1
               and String1 = ?
@@ -387,7 +387,7 @@ namespace PocketDb
         string sql = R"sql(
             SELECT String1, Id
             FROM Transactions
-            WHERE Type in (100, 101, 102)
+            WHERE Type in (100)
               and Height is not null
               and Last = 1
               and Id = ?
@@ -414,6 +414,8 @@ namespace PocketDb
     UniValue WebRpcRepository::GetUserAddress(const string& name)
     {
         UniValue result(UniValue::VARR);
+        
+        if (name.empty()) return result;
 
         auto _name = EscapeValue(name);
 
@@ -421,7 +423,7 @@ namespace PocketDb
             select p.String2, u.String1
             from Payload p indexed by Payload_String2_nocase_TxHash
             cross join Transactions u indexed by Transactions_Hash_Height
-                on u.Type in (100, 101, 102) and u.Height > 0 and u.Hash = p.TxHash and u.Last = 1
+                on u.Type in (100) and u.Height > 0 and u.Hash = p.TxHash and u.Last = 1
             where p.String2 like ? escape '\'
             limit 1
         )sql";
@@ -458,7 +460,7 @@ namespace PocketDb
         string sql = R"sql(
             select u.String1, u.Time, u.Hash
             from Transactions u indexed by Transactions_Type_Last_String1_Height_Id
-            where u.Type in (100, 101, 102)
+            where u.Type in (100)
             and u.Last in (0,1)
             and u.String1 in ( )sql" + join(vector<string>(addresses.size(), "?"), ",") + R"sql( )
             and u.Height = (
@@ -531,6 +533,7 @@ namespace PocketDb
             select
                 u.Id as AddressId,
                 u.String1 as Address,
+                u.Type,
 
                 (select count() from Transactions p indexed by Transactions_Type_String1_Height_Time_Int1
                     where p.Type in (200) and p.Hash=p.String2 and p.String1=u.String1 and (p.Height>=? or p.Height isnull)) as PostSpent,
@@ -558,7 +561,7 @@ namespace PocketDb
 
             from Transactions u indexed by Transactions_Type_Last_String1_Height_Id
 
-            where u.Type in (100, 101, 102)
+            where u.Type in (100, 170)
             and u.Height is not null
             and u.String1 = ?
             and u.Last = 1
@@ -584,15 +587,25 @@ namespace PocketDb
                 if (auto[ok, value] = TryGetColumnInt64(*stmt, i++); ok) result.pushKV("address_id", value);
                 if (auto[ok, value] = TryGetColumnString(*stmt, i++); ok) result.pushKV("address", value);
 
-                if (auto[ok, value] = TryGetColumnInt64(*stmt, i++); ok) result.pushKV("post_spent", value);
-                if (auto[ok, value] = TryGetColumnInt64(*stmt, i++); ok) result.pushKV("video_spent", value);
-                if (auto[ok, value] = TryGetColumnInt64(*stmt, i++); ok) result.pushKV("article_spent", value);
-                if (auto[ok, value] = TryGetColumnInt64(*stmt, i++); ok) result.pushKV("comment_spent", value);
-                if (auto[ok, value] = TryGetColumnInt64(*stmt, i++); ok) result.pushKV("score_spent", value);
-                if (auto[ok, value] = TryGetColumnInt64(*stmt, i++); ok) result.pushKV("comment_score_spent", value);
-                if (auto[ok, value] = TryGetColumnInt64(*stmt, i++); ok) result.pushKV("complain_spent", value);
-                
-                if (auto[ok, value] = TryGetColumnInt64(*stmt, i++); ok) result.pushKV("mod_flag_spent", value);
+                bool isDeleted = false;
+                if (auto[ok, Type] = TryGetColumnInt(*stmt, i++); ok)
+                {
+                    isDeleted = (Type==TxType::ACCOUNT_DELETE);
+                    if (isDeleted) result.pushKV("deleted", true);
+                }
+
+                if (!isDeleted) {
+                    if (auto [ok, value] = TryGetColumnInt64(*stmt, i++); ok) result.pushKV("post_spent", value);
+                    if (auto [ok, value] = TryGetColumnInt64(*stmt, i++); ok) result.pushKV("video_spent", value);
+                    if (auto [ok, value] = TryGetColumnInt64(*stmt, i++); ok) result.pushKV("article_spent", value);
+                    if (auto [ok, value] = TryGetColumnInt64(*stmt, i++); ok) result.pushKV("comment_spent", value);
+                    if (auto [ok, value] = TryGetColumnInt64(*stmt, i++); ok) result.pushKV("score_spent", value);
+                    if (auto [ok, value] = TryGetColumnInt64(*stmt, i++); ok)
+                        result.pushKV("comment_score_spent", value);
+                    if (auto [ok, value] = TryGetColumnInt64(*stmt, i++); ok) result.pushKV("complain_spent", value);
+
+                    if (auto [ok, value] = TryGetColumnInt64(*stmt, i++); ok) result.pushKV("mod_flag_spent", value);
+                }
             }
 
             FinalizeSqlStatement(*stmt);
@@ -768,21 +781,6 @@ namespace PocketDb
                     where bl.IdSource = u.id
                 ) as Blockings
 
-                , ifnull((
-                  select count(1)
-                  from Transactions ru indexed by Transactions_Type_Last_String2_Height
-                  where ru.Type in (100)
-                    and ru.Last in (0,1)
-                    and ru.String2 = u.String1
-                    and ru.Height > 0
-                    and ru.ROWID = (
-                      select min(ru1.ROWID)
-                      from Transactions ru1 indexed by Transactions_Id
-                      where ru1.Id = ru.Id
-                      limit 1
-                    )
-                ),0) as ReferralsCount
-
             )sql";
         }
 
@@ -791,9 +789,10 @@ namespace PocketDb
                   u.Hash as AccountHash
                 , u.String1 as Address
                 , u.Id
-                , p.String2 as Name
-                , p.String3 as Avatar
-                , p.String7 as Donations
+                , u.Type
+                , ifnull(p.String2,'') as Name
+                , ifnull(p.String3,'') as Avatar
+                , ifnull(p.String7,'') as Donations
                 , ifnull(u.String2,'') as Referrer
 
                 , ifnull((
@@ -838,10 +837,10 @@ namespace PocketDb
                     where lkr.Type in (111,112,113) and lkr.Id = u.Id and lkr.Last = 1
                 ),0) as Likers
 
-                , p.String6 as Pubkey
-                , p.String4 as About
-                , p.String1 as Lang
-                , p.String5 as Url
+                , ifnull(p.String6,'') as Pubkey
+                , ifnull(p.String4,'') as About
+                , ifnull(p.String1,'') as Lang
+                , ifnull(p.String5,'') as Url
                 , u.Time
 
                 , (
@@ -889,9 +888,9 @@ namespace PocketDb
                 )sql" + fullProfileSql + R"sql(
 
             from Transactions u indexed by Transactions_Type_Last_String1_Height_Id
-            cross join Payload p on p.TxHash=u.Hash
+            left join Payload p on p.TxHash=u.Hash
 
-            where u.Type in (100,101,102)
+            where u.Type in (100, 170)
               and u.Last = 1
               and u.Height is not null
               )sql" + where + R"sql(
@@ -918,69 +917,66 @@ namespace PocketDb
                 auto[ok0, hash] = TryGetColumnString(*stmt, i++);
                 auto[ok1, address] = TryGetColumnString(*stmt, i++);
                 auto[ok2, id] = TryGetColumnInt64(*stmt, i++);
+                auto[ok3, Type] = TryGetColumnInt(*stmt, i++);
+                bool isDeleted = (Type==TxType::ACCOUNT_DELETE);
 
                 record.pushKV("hash", hash);
                 record.pushKV("address", address);
                 record.pushKV("id", id);
                 if (IsDeveloper(address)) record.pushKV("dev", true);
+                if (isDeleted) record.pushKV("deleted", true);
 
-                if (auto[ok, value] = TryGetColumnString(*stmt, i++); ok) record.pushKV("name", value);
-                if (auto[ok, value] = TryGetColumnString(*stmt, i++); ok) record.pushKV("i", value);
-                if (auto[ok, value] = TryGetColumnString(*stmt, i++); ok) record.pushKV("b", value);
-                if (auto[ok, value] = TryGetColumnString(*stmt, i++); ok) record.pushKV("r", value);
-                if (auto[ok, value] = TryGetColumnInt(*stmt, i++); ok) record.pushKV("postcnt", value);
-                if (auto[ok, value] = TryGetColumnInt(*stmt, i++); ok) record.pushKV("dltdcnt", value);
-                if (auto[ok, value] = TryGetColumnInt(*stmt, i++); ok) record.pushKV("reputation", value / 10.0);
-                if (auto[ok, value] = TryGetColumnInt(*stmt, i++); ok) record.pushKV("subscribes_count", value);
-                if (auto[ok, value] = TryGetColumnInt(*stmt, i++); ok) record.pushKV("subscribers_count", value);
-                if (auto[ok, value] = TryGetColumnInt(*stmt, i++); ok) record.pushKV("blockings_count", value);
-                if (auto[ok, value] = TryGetColumnInt(*stmt, i++); ok) record.pushKV("likers_count", value);
-                if (auto[ok, value] = TryGetColumnString(*stmt, i++); ok) record.pushKV("k", value);
-                if (auto[ok, value] = TryGetColumnString(*stmt, i++); ok) record.pushKV("a", value);
-                if (auto[ok, value] = TryGetColumnString(*stmt, i++); ok) record.pushKV("l", value);
-                if (auto[ok, value] = TryGetColumnString(*stmt, i++); ok) record.pushKV("s", value);
-                if (auto[ok, value] = TryGetColumnInt64(*stmt, i++); ok) record.pushKV("update", value);
-                if (auto[ok, value] = TryGetColumnInt64(*stmt, i++); ok) record.pushKV("regdate", value);
+                if(!isDeleted) {
+                    if (auto [ok, value] = TryGetColumnString(*stmt, i++); ok) record.pushKV("name", value);
+                    if (auto [ok, value] = TryGetColumnString(*stmt, i++); ok) record.pushKV("i", value);
+                    if (auto [ok, value] = TryGetColumnString(*stmt, i++); ok) record.pushKV("b", value);
+                    if (auto [ok, value] = TryGetColumnString(*stmt, i++); ok) record.pushKV("r", value);
+                    if (auto [ok, value] = TryGetColumnInt(*stmt, i++); ok) record.pushKV("postcnt", value);
+                    if (auto [ok, value] = TryGetColumnInt(*stmt, i++); ok) record.pushKV("dltdcnt", value);
+                    if (auto [ok, value] = TryGetColumnInt(*stmt, i++); ok) record.pushKV("reputation", value / 10.0);
+                    if (auto [ok, value] = TryGetColumnInt(*stmt, i++); ok) record.pushKV("subscribes_count", value);
+                    if (auto [ok, value] = TryGetColumnInt(*stmt, i++); ok) record.pushKV("subscribers_count", value);
+                    if (auto [ok, value] = TryGetColumnInt(*stmt, i++); ok) record.pushKV("blockings_count", value);
+                    if (auto [ok, value] = TryGetColumnInt(*stmt, i++); ok) record.pushKV("likers_count", value);
+                    if (auto [ok, value] = TryGetColumnString(*stmt, i++); ok) record.pushKV("k", value);
+                    if (auto [ok, value] = TryGetColumnString(*stmt, i++); ok) record.pushKV("a", value);
+                    if (auto [ok, value] = TryGetColumnString(*stmt, i++); ok) record.pushKV("l", value);
+                    if (auto [ok, value] = TryGetColumnString(*stmt, i++); ok) record.pushKV("s", value);
+                    if (auto [ok, value] = TryGetColumnInt64(*stmt, i++); ok) record.pushKV("update", value);
+                    if (auto [ok, value] = TryGetColumnInt64(*stmt, i++); ok) record.pushKV("regdate", value);
 
-                if (auto[ok, value] = TryGetColumnString(*stmt, i++); ok)
-                {
-                    UniValue flags(UniValue::VOBJ);
-                    flags.read(value);
-                    record.pushKV("flags", flags);
-                }
-
-                if (auto[ok, value] = TryGetColumnString(*stmt, i++); ok)
-                {
-                    UniValue flags(UniValue::VOBJ);
-                    flags.read(value);
-                    record.pushKV("firstFlags", flags);
-                }
-
-                if (!shortForm)
-                {
-                    
-                    if (auto[ok, value] = TryGetColumnString(*stmt, i++); ok)
-                    {
-                        UniValue subscribes(UniValue::VARR);
-                        subscribes.read(value);
-                        record.pushKV("subscribes", subscribes);
+                    if (auto [ok, value] = TryGetColumnString(*stmt, i++); ok) {
+                        UniValue flags(UniValue::VOBJ);
+                        flags.read(value);
+                        record.pushKV("flags", flags);
                     }
 
-                    if (auto[ok, value] = TryGetColumnString(*stmt, i++); ok)
-                    {
-                        UniValue subscribes(UniValue::VARR);
-                        subscribes.read(value);
-                        record.pushKV("subscribers", subscribes);
+                    if (auto [ok, value] = TryGetColumnString(*stmt, i++); ok) {
+                        UniValue flags(UniValue::VOBJ);
+                        flags.read(value);
+                        record.pushKV("firstFlags", flags);
                     }
 
-                    if (auto[ok, value] = TryGetColumnString(*stmt, i++); ok)
-                    {
-                        UniValue subscribes(UniValue::VARR);
-                        subscribes.read(value);
-                        record.pushKV("blocking", subscribes);
+                    if (!shortForm) {
+
+                        if (auto [ok, value] = TryGetColumnString(*stmt, i++); ok) {
+                            UniValue subscribes(UniValue::VARR);
+                            subscribes.read(value);
+                            record.pushKV("subscribes", subscribes);
+                        }
+
+                        if (auto [ok, value] = TryGetColumnString(*stmt, i++); ok) {
+                            UniValue subscribes(UniValue::VARR);
+                            subscribes.read(value);
+                            record.pushKV("subscribers", subscribes);
+                        }
+
+                        if (auto [ok, value] = TryGetColumnString(*stmt, i++); ok) {
+                            UniValue subscribes(UniValue::VARR);
+                            subscribes.read(value);
+                            record.pushKV("blocking", subscribes);
+                        }
                     }
-                    
-                    if (auto[ok, value] = TryGetColumnInt(*stmt, i++); ok) record.pushKV("rc", value);
                 }
 
                 result.emplace_back(address, id, record);
@@ -1061,6 +1057,9 @@ namespace PocketDb
               ) as Donate
 
             from Transactions c indexed by Transactions_Height_Id
+
+            cross join Transactions ua indexed by Transactions_Type_Last_String1_Height_Id
+              on ua.String1 = c.String1 and ua.Type = 100 and ua.Last = 1 and ua.Height is not null
 
             cross join Transactions p indexed by Transactions_Type_Last_String2_Height
               on p.Type in (200,201,202) and p.Last = 1 and p.Height > 0 and p.String2 = c.String3
@@ -1191,6 +1190,9 @@ namespace PocketDb
                         
                         from Transactions c1 indexed by Transactions_Type_Last_String3_Height
 
+                        cross join Transactions uac indexed by Transactions_Type_Last_String1_Height_Id
+                          on uac.String1 = c1.String1 and uac.Type = 100 and uac.Last = 1 and uac.Height is not null
+
                         left join TxOutputs o indexed by TxOutputs_TxHash_AddressHash_Value
                             on o.TxHash = c1.Hash and o.AddressHash = t.String1 and o.AddressHash != c1.String1 and o.Value > ?
 
@@ -1214,6 +1216,9 @@ namespace PocketDb
                     )commentId
 
                 from Transactions t indexed by Transactions_Last_Id_Height
+
+                cross join Transactions ua indexed by Transactions_Type_Last_String1_Height_Id
+                  on ua.String1 = t.String1 and ua.Type = 100 and ua.Last = 1 and ua.Height is not null
 
                 where t.Type in (200,201,202,207)
                     and t.Last = 1
@@ -1317,6 +1322,9 @@ namespace PocketDb
                 (
                     select count(1)
                     from Transactions s indexed by Transactions_Type_Last_String4_Height
+                    -- exclude deleted accounts
+                    cross join Transactions uac indexed by Transactions_Type_Last_String1_Height_Id
+                    on uac.String1 = s.String1 and uac.Type = 100 and uac.Last = 1 and uac.Height is not null
                     where s.Type in (204, 205)
                       and s.Height is not null
                       and s.String4 = c.String2
@@ -1334,6 +1342,10 @@ namespace PocketDb
                 o.Value as Donate
 
             from Transactions c indexed by Transactions_Type_Last_String3_Height
+
+            -- exclude deleted accounts
+            cross join Transactions ua indexed by Transactions_Type_Last_String1_Height_Id
+                on ua.String1 = c.String1 and ua.Type = 100 and ua.Last = 1 and ua.Height is not null
 
             join Transactions r ON c.String2 = r.Hash
 
@@ -2411,7 +2423,7 @@ namespace PocketDb
                     p.String3 as avatarFrom
                 from Transactions t
                 cross join Transactions u indexed by Transactions_Type_Last_String1_Height_Id
-                    on u.String1 = t.String1 and u.Type in (100, 101, 102) and u.Last = 1 and u.Height > 0
+                    on u.String1 = t.String1 and u.Type in (100) and u.Last = 1 and u.Height > 0
                 cross join Payload p on p.TxHash = u.Hash
                 where t.Type in (200, 201, 202)
                     and t.Last = 1
@@ -3232,6 +3244,8 @@ namespace PocketDb
                     where scr.Type = 300 and scr.Last in (0,1) and scr.Height is not null and scr.String1 = ? and scr.String2 = t.String2),0) as MyScore
 
             from Transactions t indexed by Transactions_Last_Id_Height
+            cross join Transactions ua indexed by Transactions_Type_Last_String1_Height_Id
+                on ua.String1 = t.String1 and ua.Type = 100 and ua.Last = 1 and ua.Height is not null
             left join Payload p on t.Hash = p.TxHash
             where t.Height is not null
               and t.Last = 1
@@ -3684,6 +3698,9 @@ namespace PocketDb
         if (topContentId > 0)
             contentIdWhere = " and t.Id < ? ";
 
+        string accountExistence = " join Transactions ua indexed by Transactions_Type_Last_String1_Height_Id "
+                                  " on ua.String1 = t.String1 and ua.Type = 100 and ua.Last = 1 and ua.Height is not null ";
+
         string langFilter;
         if (!lang.empty())
             langFilter += " join Payload p indexed by Payload_String1_TxHash on p.TxHash = t.Hash and p.String1 = ? ";
@@ -3726,6 +3743,7 @@ namespace PocketDb
         string sql = R"sql(
             select t.Id
             from Transactions t indexed by Transactions_Type_Last_String1_Height_Id
+            )sql" + accountExistence + R"sql(
             )sql" + langFilter + R"sql(
             where t.Type in )sql" + contentTypesWhere + R"sql(
                 and t.Height > 0
@@ -3884,6 +3902,9 @@ namespace PocketDb
             select cnt.Id
 
             from Transactions cnt indexed by Transactions_Type_Last_String1_Height_Id
+
+            cross join Transactions ua indexed by Transactions_Type_Last_String1_Height_Id
+                on ua.String1 = cnt.String1 and ua.Type = 100 and ua.Last = 1 and ua.Height is not null
 
             )sql" + langFilter + R"sql(
 
