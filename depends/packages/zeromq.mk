@@ -16,7 +16,6 @@ define $(package)_set_vars
   $(package)_config_opts_netbsd=--with-pic
   $(package)_config_opts_openbsd=--with-pic
   $(package)_config_opts_android=--with-pic
-  $(package)_cxxflags=-std=c++11
 endef
 
 define $(package)_preprocess_cmds
