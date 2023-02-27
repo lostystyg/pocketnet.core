@@ -57,7 +57,7 @@ $(package)_config_opts_riscv64_linux=linux-generic64
 $(package)_config_opts_x86_64_darwin=darwin64-x86_64-cc
 $(package)_config_opts_x86_64_mingw32=mingw64
 $(package)_config_opts_i686_mingw32=mingw
-$(package)_cflags=-std=11
+$(package)_cflags=-std=c11
 
 endef
 
