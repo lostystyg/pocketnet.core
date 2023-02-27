@@ -44,5 +44,6 @@ define $(package)_build_cmds
 endef
 
 define $(package)_stage_cmds
-  ./b2 -d0 -j4 --prefix=$($(package)_staging_prefix_dir) $($(package)_config_opts) toolset=$($(package)_toolset_$(host_os)) install
+  mkdir -p $($(package)_staging_prefix_dir)/include && \
+  cp -r boost $($(package)_staging_prefix_dir)/include
 endef
