@@ -47,7 +47,7 @@ MULTIPROCESS ?=
 LTO ?=
 FALLBACK_DOWNLOAD_PATH ?= https://bitcoincore.org/depends-sources
 
-C_STANDARD ?= c11
+C_STANDARD ?= c99
 CXX_STANDARD ?= c++17
 
 BUILD = $(shell ./config.guess)
