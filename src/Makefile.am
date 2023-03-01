@@ -11,14 +11,10 @@ AM_LIBTOOLFLAGS = --preserve-dup-deps
 PTHREAD_FLAGS = $(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
 EXTRA_LIBRARIES =
 
-if EMBEDDED_UNIVALUE
 LIBUNIVALUE = univalue/libunivalue.la
 
 $(LIBUNIVALUE): $(wildcard univalue/lib/*) $(wildcard univalue/include/*)
 	$(AM_V_at)$(MAKE) $(AM_MAKEFLAGS) -C $(@D) $(@F)
-else
-LIBUNIVALUE = $(UNIVALUE_LIBS)
-endif
 
 POCKETCOIN_INCLUDES=-I$(builddir) -I$(srcdir)/secp256k1/include $(BDB_CPPFLAGS) $(BOOST_CPPFLAGS) $(LEVELDB_CPPFLAGS)
 
@@ -55,9 +51,13 @@ if ENABLE_AVX2
 LIBPOCKETCOIN_CRYPTO_AVX2 = crypto/libpocketcoin_crypto_avx2.a
 LIBPOCKETCOIN_CRYPTO += $(LIBPOCKETCOIN_CRYPTO_AVX2)
 endif
-if ENABLE_SHANI
-LIBPOCKETCOIN_CRYPTO_SHANI = crypto/libpocketcoin_crypto_shani.a
-LIBPOCKETCOIN_CRYPTO += $(LIBPOCKETCOIN_CRYPTO_SHANI)
+if ENABLE_X86_SHANI
+LIBPOCKETCOIN_CRYPTO_X86_SHANI = crypto/libpocketcoin_crypto_x86_shani.la
+LIBPOCKETCOIN_CRYPTO += $(LIBPOCKETCOIN_CRYPTO_X86_SHANI)
+endif
+if ENABLE_ARM_SHANI
+LIBPOCKETCOIN_CRYPTO_ARM_SHANI = crypto/libpocketcoin_crypto_arm_shani.la
+LIBPOCKETCOIN_CRYPTO += $(LIBPOCKETCOIN_CRYPTO_ARM_SHANI)
 endif
 
 $(LIBSECP256K1): $(wildcard secp256k1/src/*.h) $(wildcard secp256k1/src/*.c) $(wildcard secp256k1/include/*)
@@ -810,10 +810,6 @@ if USE_LIBEVENT
 libpocketcoin_util_a_SOURCES += util/url.cpp
 endif
 
-if GLIBC_BACK_COMPAT
-libpocketcoin_util_a_SOURCES += compat/glibc_compat.cpp
-AM_LDFLAGS += $(COMPAT_LDFLAGS)
-endif
 
 # cli: shared between pocketcoin-cli and pocketcoin-qt
 libpocketcoin_cli_a_CPPFLAGS = $(AM_CPPFLAGS) $(POCKETCOIN_INCLUDES)
@@ -1006,10 +1002,8 @@ if HARDEN
 	$(AM_V_at) READELF=$(READELF) OBJDUMP=$(OBJDUMP) OTOOL=$(OTOOL) $(PYTHON) $(top_srcdir)/contrib/devtools/security-check.py $(bin_PROGRAMS)
 endif
 
-if EMBEDDED_LEVELDB
 include Makefile.crc32c.include
 include Makefile.leveldb.include
-endif
 
 include Makefile.test_util.include
 include Makefile.test_fuzz.include
